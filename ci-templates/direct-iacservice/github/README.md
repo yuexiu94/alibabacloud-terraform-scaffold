@@ -16,6 +16,7 @@ A CI/CD integration solution based on GitHub Actions and Alibaba Cloud IacServic
   - [Workflow Dependencies](#workflow-dependencies)
 - [Daily Usage](#daily-usage)
   - [Create IacService Stack](#create-iacservice-stack)
+  - [Configure Secret Parameters](#configure-secret-parameters)
   - [Change Process](#change-process)
   - [Running Parameters](#running-parameters)
 - [Operations Reference](#operations-reference)
@@ -266,6 +267,8 @@ Click [Stack], select [Create Stack].
 
 Select or create a parameter set, click [Next].
 
+> **Secret Parameters**: Parameter sets support defining secret parameters (e.g., passwords, API Tokens, access keys). Secret parameter values are automatically encrypted via Alibaba Cloud KMS and displayed as masked values in the UI, logs, and API responses. The secret attribute cannot be revoked once set. When referencing secret parameters in a Stack, the corresponding component variable must declare `sensitive: true`.
+
 **Step 4: Confirm Creation**
 
 After checking the configuration information is correct, click [Create].
@@ -274,7 +277,81 @@ After checking the configuration information is correct, click [Create].
 
 ---
 
-## Change Workflow
+## Configure Secret Parameters
+
+Secret parameters are used to store confidential information such as passwords, API Tokens, and access keys in parameter sets. Values marked as secret are automatically encrypted and masked across the entire pipeline.
+
+### Prerequisite: Set Up Encryption Key
+
+Before using secret parameters for the first time, configure an encryption key for the current account:
+
+1. Navigate to **System Settings > Encryption Settings**.
+2. On first configuration, the system will guide you through Service-Linked Role (SLR) authorization.
+3. Select the key type:
+   - **Service Key**: Automatically created by the system when no key is specified. No manual maintenance required, suitable for quick start.
+   - **User-Managed Key**: Select a key you created in KMS. Suitable for scenarios requiring full control over key lifecycle management.
+4. Save the settings.
+
+> **Key Rotation**: Key replacement is supported. After replacement, new secret values are encrypted with the new key while historical data remains decryptable with the old key. Ensure the old key remains enabled in KMS at all times.
+>
+> **Key Deletion Protection**: Before deleting a key in KMS, the system automatically validates whether encrypted resources still depend on it. If associated resources exist, deletion will be blocked.
+
+### Create Secret Parameters in a Parameter Set
+
+1. Navigate to the parameter set list page and create a new parameter set or edit an existing one.
+2. Click **Add Parameter**, fill in the parameter name and value.
+3. Check the **Secret** option.
+4. Save the parameter set.
+
+After saving, the parameter value is displayed as a mask on the UI and the plaintext can no longer be viewed.
+
+**Notes**:
+
+- The secret attribute cannot be revoked once set. To change, delete the parameter and recreate it.
+- Secret parameters only support value modification (enter a new value directly to overwrite). The old value is not required.
+
+### Declare Sensitive Variables in Stack Component
+
+Component variables that receive secret parameter values must declare `sensitive: true` in their definition:
+
+```yaml
+variable:
+  - name: db_password
+    type: string
+    sensitive: true
+    description: "Database password"
+
+  - name: api_token
+    type: string
+    sensitive: true
+    description: "API access token"
+```
+
+### Reference Secret Parameters in Deployment
+
+Use the `store` block to reference parameter sets containing secret parameters, passing variable values in `deployment.inputs`:
+
+```yaml
+store:
+  - type: "varset"
+    store_name: "credentials"
+    name: "my-credentials-set"
+    category: "terraform"
+
+deployment:
+  - name: "main"
+    inputs:
+      db_password: store.varset.credentials.db_password
+      api_token: store.varset.credentials.api_token
+```
+
+Reference format: `store.<STORE_TYPE>.<STORE_NAME>.<VARIABLE_NAME>`
+
+Secret values are automatically decrypted and injected into the runtime environment during Stack execution, but remain masked in the console UI, execution logs, and PR comment results.
+
+---
+
+## Change Process
 
 1. Create a development branch, commit code changes, push to GitHub
 
@@ -299,7 +376,7 @@ iac terraform apply -profile=dev -stack=demo
 
 ---
 
-## Runtime Parameter Reference
+## Running Parameters
 
 Runtime parameters are passed via PR comments in the following format:
 
@@ -339,6 +416,7 @@ iac terraform plan/apply [-profile=<profileName>] [-stack=<StackName>]
 | Result retrieval timeout | Default polling timeout is 600 seconds, check IacService console to confirm if the Stack is executing |
 | Partial multi-environment failure | Check GitHub Actions logs, `shared-ci-upload-source-package` will list the failed profile names |
 | View detailed errors | Check GitHub Actions run logs, or check execution records in IacService console |
+| Secret parameter decryption failure | Verify encryption settings are initialized (System Settings > Encryption Settings) and the KMS key is enabled and not deleted or disabled |
 
 ---
 
